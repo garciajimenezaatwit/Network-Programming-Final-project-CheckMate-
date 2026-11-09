@@ -1,7 +1,7 @@
 # CheckMate (Python port)
 
 Chess for two players over a network, or against a random-move CPU.
-Original authors: Alby Garcia, Cameron Katz, and Kai Weinstein.
+Original authors: Alby Garcia-Jimenez,Nicholas Tran, Khush Patel.
 
 ## Run
 
