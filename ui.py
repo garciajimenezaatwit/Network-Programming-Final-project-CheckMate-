@@ -5,9 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
-from bot import ChessBot
 from engine import ChessBoard, GameStateManager, Move, Pawn
-from network import NetworkManager
 
 try:                                   # Pillow gives smooth image scaling
     from PIL import Image, ImageTk
@@ -33,13 +31,13 @@ _GLYPHS = {
 # Connection screen
 # --------------------------------------------------------------------------
 class ConnectionUI:
-    def __init__(self, root: tk.Tk, nm: NetworkManager):
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.nm = nm
         self._events: "queue.Queue[tuple]" = queue.Queue()
+        self.nm = None   # TODO: replace with your network.py object, e.g. NetworkManager()
 
         root.title("CheckMate Online")
-        root.geometry("350x250")
+        root.geometry("350x220")
         self.frame = tk.Frame(root)
         self.frame.pack(expand=True, fill="both", padx=20, pady=10)
 
@@ -48,8 +46,6 @@ class ConnectionUI:
         tk.Entry(self.frame, textvariable=self.ip_var, justify="center").pack(fill="x", pady=4)
         tk.Button(self.frame, text=f"Host Game (Port {PORT})", command=self._host).pack(fill="x", pady=2)
         tk.Button(self.frame, text="Join Friend", command=self._join).pack(fill="x", pady=2)
-        tk.Button(self.frame, text="Play vs CPU (Offline)", bg="#dcdcdc",
-                  command=lambda: self._start_game(True, True)).pack(fill="x", pady=2)
         self.status = tk.Label(self.frame, text="", fg="gray30")
         self.status.pack(pady=4)
 
@@ -64,7 +60,7 @@ class ConnectionUI:
         def work():
             try:
                 self.nm.start_as_host(PORT)
-                self._events.put(("start", True, False))
+                self._events.put(("start", True))
             except Exception as exc:
                 print(exc)
                 self._events.put(("error", f"Port {PORT} is busy."))
@@ -77,7 +73,7 @@ class ConnectionUI:
         def work():
             try:
                 self.nm.start_as_guest(ip, PORT)
-                self._events.put(("start", False, False))
+                self._events.put(("start", False))
             except Exception as exc:
                 print(exc)
                 self._events.put(("error", "Could not connect."))
@@ -90,7 +86,7 @@ class ConnectionUI:
             while True:
                 event = self._events.get_nowait()
                 if event[0] == "start":
-                    self._start_game(event[1], event[2])
+                    self._start_game(event[1])
                     return
                 self.status.config(text="")
                 messagebox.showinfo("CheckMate", event[1], parent=self.root)
@@ -98,22 +94,20 @@ class ConnectionUI:
             pass
         self.root.after(100, self._poll)
 
-    def _start_game(self, is_white: bool, is_bot: bool) -> None:
+    def _start_game(self, is_white: bool) -> None:
         self.frame.destroy()
         board = ChessBoard()
-        GameStateManager.active_gui = GUI(self.root, board, self.nm, is_white, is_bot)
+        GameStateManager.active_gui = GUI(self.root, board, self.nm, is_white)
 
 
 # --------------------------------------------------------------------------
 # Game window
 # --------------------------------------------------------------------------
 class GUI:
-    def __init__(self, root: tk.Tk, board: ChessBoard, nm: NetworkManager,
-                 is_white: bool, is_bot: bool):
+    def __init__(self, root: tk.Tk, board: ChessBoard, nm, is_white: bool):
         self.root = root
         self.board = board
         self.nm = nm
-        self.is_bot = is_bot
         self.my_turn = is_white
         self.color = "White" if is_white else "Black"
         self.selected = None                 # (row, col) of the selected piece
@@ -132,7 +126,7 @@ class GUI:
         self.canvas.bind("<Button-1>", self._on_click)
         self._draw()
 
-        if not is_bot and nm is not None:
+        if self.nm is not None:
             self._start_listening()
             self._poll_incoming()
 
@@ -202,13 +196,10 @@ class GUI:
                     move.promotion_type = self._prompt_promotion()
 
                 self.my_turn = False
-                if not self.is_bot and self.nm is not None:
+                if self.nm is not None:
                     self.nm.send_move(move)
 
                 self._apply_move_locally(move)
-
-                if self.is_bot and not self._closed:
-                    self.root.after(700, self._trigger_bot_move)
         if not self._closed:
             self._draw()
 
@@ -233,18 +224,6 @@ class GUI:
         move.execute_move()          # may end the game via checkmate_popup()
         if not self._closed:
             self._draw()
-
-    def _trigger_bot_move(self) -> None:
-        if self._closed:
-            return
-        bot_color = "Black" if self.color.lower() == "white" else "White"
-        move = ChessBot().generate_random_move(self.board, bot_color)
-        if move is not None:
-            start = ChessBoard.get_square(move.start_row, move.start_col)
-            if isinstance(start.piece, Pawn) and move.end_row in (0, 7):
-                move.promotion_type = 1            # the bot always promotes to a Queen
-            self._apply_move_locally(move)
-        self.my_turn = True
 
     # --- network ------------------------------------------------------------
     def _start_listening(self) -> None:
@@ -273,3 +252,9 @@ class GUI:
         messagebox.showinfo("Checkmate", f"GAME OVER! {winner_color} Won!", parent=self.root)
         self._closed = True
         self.root.destroy()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    ConnectionUI(root)
+    root.mainloop()
